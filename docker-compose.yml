@@ -1,0 +1,81 @@
+version: '3.9'
+
+services:
+  storage_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: storageapi
+    depends_on:
+      - db
+      - minio
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+    env_file:
+      - .env
+
+  memes_api:
+    build:
+      context: .
+      dockerfile: Dockerfile.memes_api
+    container_name: memesapi
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - minio
+      - storage_api
+
+  db:
+    image: postgres
+    container_name: postgres_db
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data  --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
+    volumes:
+      - /c/MinIO/data:/data
+      - /c/MinIO/config:/root/.minio
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set minio ${MINIO_ENDPOINT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; do
+        echo 'Waiting for MinIO server to start...'
+        sleep 5
+      done;
+      if ! /usr/bin/mc ls minio/${MINIO_ENDPOINT} &> /dev/null; then
+        /usr/bin/mc mb minio/${MINIO_ENDPOINT};
+        /usr/bin/mc anonymous set public minio/${MINIO_ENDPOINT};
+      else
+        echo 'Bucket minio/${MINIO_ENDPOINT} already exists.'
+      fi;
+      tail -f /dev/null;
+      "
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
+
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: ‘mynetwork’
